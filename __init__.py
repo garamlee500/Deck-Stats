@@ -100,14 +100,11 @@ def deck_browser_will_render_deck_node(deck_browser: DeckBrowser, node: Any, con
 
     # Insert before the gear/options column (last column)
     if '</td>' in content:
-        parts = content.rsplit('</td>', 1)
-        content = parts[0] + '</td>' + custom_html + parts[1]
+        parts = content.rsplit('</td>')
+        content = '</td>'.join(parts[0:4] + [custom_html] + parts[4:])
 
     return content
 
 
 # Register hooks
 gui_hooks.deck_browser_will_render_content.append(deck_browser_will_show)
-
-# Note: Anki 2.1.50+ uses different hook system
-# For older versions, you may need to monkey-patch DeckBrowser methods directly
