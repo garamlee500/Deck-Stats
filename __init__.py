@@ -34,7 +34,7 @@ def get_colour(accuracy: float, deck_id: DeckId) -> str:
 
 
     # If retention below a certain point we just say its unacceptable and give it a red
-    retention_crit_point = 0.8 * desired_retention
+    retention_crit_point = 0.9 * desired_retention
 
 
     if accuracy == 1:
