@@ -9,6 +9,21 @@ import datetime
 
 # Store desired retention to save time
 desired_retention_lookup ={}
+day_millisecond = 24 * 3600 * 1000
+# Assume 4am utc is reset point implementing time zone support is too complicated and is not useful for me
+nextDayReset = datetime.datetime.combine(datetime.datetime.today() + datetime.timedelta(days=1),
+                                         datetime.time(4)).timestamp() * 1000
+
+cutOffs = {
+    'Today': nextDayReset - day_millisecond,
+    'Yesterday': nextDayReset - 2 * day_millisecond,
+    'Last Week': nextDayReset - 7 * day_millisecond,
+    'Last Month': nextDayReset - 30 * day_millisecond,
+    'Last Year': nextDayReset - 365 * day_millisecond,
+    'All': 0
+}
+
+
 
 def create_table_element_HTML(content: str, title: str, colour = None) -> str:
     if colour is None:
@@ -69,75 +84,71 @@ def get_colour(accuracy: float, deck_id: DeckId) -> str:
 
 
 def get_deck_stats(deck_id: DeckId) -> str:
-    # Get all cards in the deck
-    card_ids = mw.col.decks.cids(deck_id, children=True)
     result = ""
-
-    if not card_ids:
-        for cutoff in ["Today", "Yesterday", "Last Week", "Last Year", "All"]:
-            result +=  create_table_element_HTML("N/A", f"Card Retention Rate - {cutoff}")
-
-        return result
-
-    day_millisecond = 24*3600*1000
-    # Assume 4am utc is reset point implementing time zone support is too complicated and is not useful for me
-    nextDayReset = datetime.datetime.combine(datetime.datetime.today()+datetime.timedelta(days=1),datetime.time(4)).timestamp() * 1000
-    cutOffs = {
-        'Today': nextDayReset - day_millisecond,
-        'Yesterday': nextDayReset - 2 * day_millisecond,
-        'Last Week': nextDayReset - 7 * day_millisecond,
-        'Last Month': nextDayReset - 30 * day_millisecond,
-        'Last Year': nextDayReset - 365 * day_millisecond,
-        'All': 0
-    }
-    
     for cutoff in cutOffs:
-        # For correct retention querying see code used for inprogram stats
-        # https://github.com/ankitects/anki/blob/bb7f6bbc776c79f05fd35c60041a6ffdde5bbd2b/rslib/src/stats/graphs/retention.rs#L56
-        # Query review history
-        reviews = mw.col.db.first(
-            f"SELECT COUNT(NULLIF(ease,1)) as passes, COUNT(ease) as total FROM revlog WHERE "
-            f"(type = 1 OR "
-            f"lastIvl>=1 OR "
-            f"lastIvl<= -86400) AND "
-            f"ease > 0 AND "
-            f"id > {cutOffs[cutoff]} AND "
-            f"id < {cutOffs['Today'] if cutoff == 'Yesterday' else nextDayReset} AND "
-            f"cid IN {str(tuple(card_ids)) if len(card_ids) > 1 else f'({card_ids[0]})'}"
-        )
-        if reviews and reviews[1] > 0:
-
-            accuracy = reviews[0] / reviews[1]
-            result +=  create_table_element_HTML(f"{100 * accuracy:.1f}%",
-                                                 f"Card Retention Rate - {cutoff}",
-                                                 get_colour(accuracy, deck_id))
-        else:
+        try:
+            passes = passes_by_deck[cutoff][deck_id]
+            total = totals_by_deck[cutoff][deck_id]
+            if total > 0:
+                accuracy = passes / total
+                result +=  create_table_element_HTML(f"{100 * accuracy:.1f}%",
+                                                     f"Card Retention Rate - {cutoff}",
+                                                     get_colour(accuracy, deck_id))
+            else:
+                result += create_table_element_HTML("N/A", f"Card Retention Rate - {cutoff}")
+        except KeyError:
             result += create_table_element_HTML("N/A", f"Card Retention Rate - {cutoff}")
 
     return result
 
 
 def deck_browser_will_show(deck_browser: DeckBrowser, content: DeckBrowserContent) -> None:
-    # """Modify the deck list to include custom columns."""
-    # deck_browser._original_render_deck_tree = deck_browser._renderDeckTree
-    #
-    # def custom_render_deck_tree(nodes: Sequence[Any]) -> str:
-    #     """Custom rendering with additional columns."""
-    #     # Get original HTML
-    #     buf = deck_browser._original_render_deck_tree(nodes)
-    #
-    #     # Inject custom CSS for new columns
-    #     custom_css = """
-    #     <style>
-    #     .retention-col { min-width: 80px; text-align: center; }
-    #     .mature-col { min-width: 60px; text-align: center; }
-    #     .young-col { min-width: 60px; text-align: center; }
-    #     </style>
-    #     """
-    #
-    #     return custom_css + buf
 
-    #deck_browser._renderDeckTree = custom_render_deck_tree
+    # Do one query
+
+    for cutoff in cutOffs:
+        # For correct retention querying see code used for inprogram stats
+        # https://github.com/ankitects/anki/blob/bb7f6bbc776c79f05fd35c60041a6ffdde5bbd2b/rslib/src/stats/graphs/retention.rs#L56
+        # Query review history - this ensures cards only processed once
+        # At least per cutoff by now - this could be further optimised wih CTEs
+        reviews = mw.col.db.all(
+            f"SELECT COUNT(NULLIF(ease,1)) as passes, COUNT(ease) as total, did "
+            f"FROM revlog, cards "
+            f"WHERE revlog.cid = cards.id AND "
+            f"(revlog.type = 1 OR "
+            f"lastIvl>=1 OR "
+            f"lastIvl<= -86400) AND "
+            f"ease > 0 AND "
+            f"revlog.id > {cutOffs[cutoff]} AND "
+            f"revlog.id < {cutOffs['Today'] if cutoff == 'Yesterday' else nextDayReset} "
+            f"GROUP BY did"
+        )
+
+        totals_by_subdeck = {}
+        passes_by_subdeck = {}
+        for passes, total, deck_id in reviews:
+            totals_by_subdeck[deck_id] = total
+            passes_by_subdeck[deck_id] = passes
+
+        # Need to count up for children too
+
+
+        tree = mw.col.decks.deck_tree()
+
+        def process_node(node: DeckTreeNode):
+            if node.deck_id in totals_by_subdeck:
+                passes_by_deck[cutoff][node.deck_id] = passes_by_subdeck[node.deck_id]
+                totals_by_deck[cutoff][node.deck_id] = totals_by_subdeck[node.deck_id]
+            else:
+                totals_by_deck[cutoff][node.deck_id] = 0
+                passes_by_deck[cutoff][node.deck_id] = 0
+            for child in node.children:
+                process_node(child)
+                totals_by_deck[cutoff][node.deck_id] += totals_by_deck[cutoff][child.deck_id]
+                passes_by_deck[cutoff][node.deck_id] += passes_by_deck[cutoff][child.deck_id]
+
+        process_node(tree)
+
 
     # Only want to add extra stat column functions once to hook
     if not hasattr(deck_browser, "_old_render_node"):
@@ -165,3 +176,9 @@ def deck_browser_will_render_deck_node(deck_browser: DeckBrowser, node: Any, con
 
 # Register hooks
 gui_hooks.deck_browser_will_render_content.append(deck_browser_will_show)
+totals_by_deck = {}
+passes_by_deck = {}
+for cutOff in cutOffs:
+    # Initialse dicts
+    totals_by_deck[cutOff] = {}
+    passes_by_deck[cutOff] = {}
