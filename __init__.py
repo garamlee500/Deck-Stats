@@ -9,20 +9,24 @@ import datetime
 
 # Store desired retention to save time
 desired_retention_lookup ={}
-day_millisecond = 24 * 3600 * 1000
-# Assume 4am utc is reset point implementing time zone support is too complicated and is not useful for me
-nextDayReset = datetime.datetime.combine(datetime.datetime.today() + datetime.timedelta(days=1),
-                                         datetime.time(4)).timestamp() * 1000
-
 cutOffs = {
-    'Today': nextDayReset - day_millisecond,
+}
+nextDayReset=None
+
+def resetTime():
+    # Update current date etc.
+    global cutOffs, nextDayReset
+    day_millisecond = 24 * 3600 * 1000
+    # Assume 4am utc is reset point implementing time zone support is too complicated and is not useful for me
+    nextDayReset = datetime.datetime.combine(datetime.datetime.today() + datetime.timedelta(days=1),
+                                             datetime.time(4)).timestamp() * 1000
+
+    cutOffs = {'Today': nextDayReset - day_millisecond,
     'Yesterday': nextDayReset - 2 * day_millisecond,
     'Last Week': nextDayReset - 7 * day_millisecond,
     'Last Month': nextDayReset - 30 * day_millisecond,
     'Last Year': nextDayReset - 365 * day_millisecond,
-    'All': 0
-}
-
+    'All': 0}
 
 
 def create_table_element_HTML(content: str, title: str, colour = None) -> str:
@@ -103,9 +107,9 @@ def get_deck_stats(deck_id: DeckId) -> str:
 
 
 def deck_browser_will_show(deck_browser: DeckBrowser, content: DeckBrowserContent) -> None:
+    resetTime()
 
     # Do one query
-
     for cutoff in cutOffs:
         # For correct retention querying see code used for inprogram stats
         # https://github.com/ankitects/anki/blob/bb7f6bbc776c79f05fd35c60041a6ffdde5bbd2b/rslib/src/stats/graphs/retention.rs#L56
@@ -178,6 +182,7 @@ def deck_browser_will_render_deck_node(deck_browser: DeckBrowser, node: Any, con
 gui_hooks.deck_browser_will_render_content.append(deck_browser_will_show)
 totals_by_deck = {}
 passes_by_deck = {}
+resetTime()
 for cutOff in cutOffs:
     # Initialse dicts
     totals_by_deck[cutOff] = {}
