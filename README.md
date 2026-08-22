@@ -3,6 +3,5 @@
 ![img.png](img.png)
 ### TODO:
 - Investigate when deck browser gets refreshed - does not always seem to refresh stats when pressing "d"
-- Add column labels
 - Add more/configurable stats
 - Button to view stats for that deck?

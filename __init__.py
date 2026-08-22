@@ -108,6 +108,44 @@ def get_deck_stats(deck_id: DeckId) -> str:
 
 def deck_browser_will_show(deck_browser: DeckBrowser, content: DeckBrowserContent) -> None:
     resetTime()
+    if "deck-retention-group" not in content.tree:
+        retention_col_count = len(cutOffs)
+        retention_period_headers = "".join(
+            f"<th class=\"count\" style=\"text-align:center !important; background-color:rgba(255,255,255,0.08);\" title=\"Card Retention Rate - {cutoff}\">{cutoff}</th>"
+            for cutoff in cutOffs
+        )
+        retention_group_row = (
+            f"<tr class=\"deck-retention-group\">"
+            f"<th colspan=8></th>"
+            f"<th class=\"count\" colspan={retention_col_count} "
+            f"style=\"text-align:center !important; background-color:rgba(255,255,255,0.08); border-radius:8px 8px 0 0;\">Retention</th>"
+            f"<th></th>"
+            f"</tr>"
+        )
+
+        if "<tbody><tr><th colspan" in content.tree:
+            content.tree = content.tree.replace(
+                "<tbody><tr><th colspan",
+                f"<tbody>{retention_group_row}<tr><th colspan",
+                1,
+            )
+        else:
+            content.tree = content.tree.replace(
+                "<tr><th colspan",
+                f"{retention_group_row}<tr><th colspan",
+                1,
+            )
+
+        content.tree = content.tree.replace(
+            "<th class=optscol></th></tr><tr",
+            f"{retention_period_headers}<th class=optscol></th></tr><tr",
+            1,
+        )
+        content.tree = content.tree.replace(
+            "<th class=\"optscol\"></th></tr><tr",
+            f"{retention_period_headers}<th class=\"optscol\"></th></tr><tr",
+            1,
+        )
 
     # Do one query
     for cutoff in cutOffs:
@@ -165,7 +203,6 @@ def deck_browser_will_show(deck_browser: DeckBrowser, content: DeckBrowserConten
 def deck_browser_will_render_deck_node(deck_browser: DeckBrowser, node: Any, content: Any) -> Any:
     """Add custom statistics to each deck row."""
     deck_id = node.deck_id
-    stats = get_deck_stats(deck_id)
 
     # Add custom columns to the deck row
     custom_html = get_deck_stats(deck_id)
